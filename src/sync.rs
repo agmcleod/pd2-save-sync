@@ -49,6 +49,15 @@ pub enum SyncMode {
     PullOnly,
 }
 
+/// Determines if a file name should be ignored during sync scanning (e.g. system files, history, state, conflict files)
+pub fn is_ignored_filename(file_name: &str, user_ignored: &[String]) -> bool {
+    file_name == HISTORY_DIR_NAME
+        || file_name == STATE_FILE_NAME
+        || file_name.contains(".conflict")
+        || file_name.starts_with('.')
+        || user_ignored.iter().any(|ig| ig.eq_ignore_ascii_case(file_name))
+}
+
 /// Scans only level-1 files from a directory (subfolders and ignored files are excluded)
 pub fn scan_level_one_files(dir: &Path, ignored: &[String]) -> Result<Vec<PathBuf>> {
     if !dir.exists() {
@@ -64,11 +73,8 @@ pub fn scan_level_one_files(dir: &Path, ignored: &[String]) -> Result<Vec<PathBu
         if path.is_file() {
             let file_name = entry.file_name().to_string_lossy().to_string();
 
-            // Ignore internal history folder, state tracking file, and user-configured ignored files
-            if file_name == HISTORY_DIR_NAME
-                || file_name == STATE_FILE_NAME
-                || ignored.iter().any(|ig| ig.eq_ignore_ascii_case(&file_name))
-            {
+            // Ignore internal history folder, state tracking file, conflict files, and user-configured ignored files
+            if is_ignored_filename(&file_name, ignored) {
                 continue;
             }
             files.push(path);
@@ -412,7 +418,7 @@ pub fn execute_sync(items: &[SyncItem], config: &Config, dry_run: bool) -> Resul
                     if item.remote_path.exists() {
                         if let Ok(_) = fs::copy(&item.remote_path, &conflict_path) {
                             println!(
-                                "{} Preserved conflicting remote copy at {}",
+                                "{} Preserved conflicting remote copy locally at {}",
                                 "[SAFETY]".yellow(),
                                 conflict_name.cyan()
                             );

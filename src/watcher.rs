@@ -5,7 +5,7 @@ use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
-use crate::sync::{SyncMode, execute_sync, plan_sync};
+use crate::sync::{is_ignored_filename, execute_sync, plan_sync, SyncMode};
 
 /// Starts watching the local directory for save changes and triggers sync with debouncing
 pub fn watch_and_sync(config: &Config) -> Result<()> {
@@ -41,17 +41,12 @@ pub fn watch_and_sync(config: &Config) -> Result<()> {
     loop {
         match rx.recv() {
             Ok(event) => {
-                // Check if any path in event is a file in the local root (not a subdirectory)
+                // Check if any path in event is a file in the local root (not a subdirectory or conflict file)
                 let relevant = event.paths.iter().any(|p| {
                     p.parent() == Some(&config.local_dir)
                         && p.file_name()
                             .map(|n| n.to_string_lossy().to_string())
-                            .map(|n| {
-                                !config
-                                    .ignored_files
-                                    .iter()
-                                    .any(|ig| ig.eq_ignore_ascii_case(&n))
-                            })
+                            .map(|n| !is_ignored_filename(&n, &config.ignored_files))
                             .unwrap_or(false)
                 });
 

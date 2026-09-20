@@ -30,6 +30,10 @@ fn test_level_one_only_and_ignore_subfolders() {
     // Ignored file
     fs::write(save_dir.join("desktop.ini"), b"ignore me").unwrap();
 
+    // Conflict backup files (should be ignored and kept strictly locally)
+    fs::write(save_dir.join("Paladin.conflict_20260920_120000.d2s"), b"conflict copy").unwrap();
+    fs::write(save_dir.join("SharedStash.stash.conflict_20260920_120000"), b"conflict copy").unwrap();
+
     let ignored = vec!["desktop.ini".to_string()];
     let scanned = scan_level_one_files(&save_dir, &ignored).unwrap();
 
@@ -43,6 +47,8 @@ fn test_level_one_only_and_ignore_subfolders() {
     assert!(names.contains(&"Paladin.map".to_string()));
     assert!(!names.contains(&"Ignored.d2s".to_string()));
     assert!(!names.contains(&"desktop.ini".to_string()));
+    assert!(!names.contains(&"Paladin.conflict_20260920_120000.d2s".to_string()));
+    assert!(!names.contains(&"SharedStash.stash.conflict_20260920_120000".to_string()));
 }
 
 #[test]
