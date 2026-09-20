@@ -18,8 +18,7 @@ pub struct VersionEntry {
 
 /// Computes the SHA-256 hash of a file's content
 pub fn compute_file_hash(path: &Path) -> Result<String> {
-    let bytes =
-        fs::read(path).with_context(|| format!("Failed to read file for hashing: {:?}", path))?;
+    let bytes = fs::read(path).with_context(|| format!("Failed to read file for hashing: {:?}", path))?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     Ok(hex::encode(hasher.finalize()))
@@ -33,6 +32,27 @@ pub fn get_history_dir(remote_dir: &Path) -> PathBuf {
 /// Returns the specific history folder for a given file name
 pub fn get_file_history_dir(remote_dir: &Path, file_name: &str) -> PathBuf {
     get_history_dir(remote_dir).join(file_name)
+}
+
+/// Parses the timestamp and hash encoded in an archive filename
+/// Formats supported:
+/// - YYYYMMDD_HHMMSS_ffffff_<hash>_<filename> (5 parts)
+/// - YYYYMMDD_HHMMSS_<hash>_<filename> (4 parts)
+pub fn parse_archive_filename(name: &str) -> (Option<String>, Option<String>) {
+    let parts: Vec<&str> = name.split('_').collect();
+    if parts.len() >= 5 {
+        // parts[0] = YYYYMMDD, parts[1] = HHMMSS, parts[2] = ffffff, parts[3] = hash
+        let timestamp = format!("{}_{}_{}", parts[0], parts[1], parts[2]);
+        let hash = parts[3].to_string();
+        (Some(timestamp), Some(hash))
+    } else if parts.len() >= 4 {
+        // parts[0] = YYYYMMDD, parts[1] = HHMMSS, parts[2] = hash
+        let timestamp = format!("{}_{}", parts[0], parts[1]);
+        let hash = parts[2].to_string();
+        (Some(timestamp), Some(hash))
+    } else {
+        (None, None)
+    }
 }
 
 /// Archives a copy of the specified file to the remote history directory,
@@ -126,15 +146,8 @@ pub fn list_versions(remote_dir: &Path, file_name: &str) -> Result<Vec<VersionEn
             let modified: DateTime<Local> = meta.modified().unwrap_or(SystemTime::now()).into();
 
             let name = entry.file_name().to_string_lossy().to_string();
-            // Extract hash if encoded in filename (e.g. YYYYMMDD_HHMMSS_ffffff_<hash>_<original_name>)
-            let parts: Vec<&str> = name.splitn(4, '_').collect();
-            let hash = if parts.len() >= 4 {
-                parts[2].to_string()
-            } else if parts.len() >= 3 {
-                parts[1].to_string()
-            } else {
-                compute_file_hash(&path).unwrap_or_default()
-            };
+            let (_, parsed_hash) = parse_archive_filename(&name);
+            let hash = parsed_hash.unwrap_or_else(|| compute_file_hash(&path).unwrap_or_default());
 
             entries.push(VersionEntry {
                 file_name: name,

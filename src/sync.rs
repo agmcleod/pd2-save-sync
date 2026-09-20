@@ -244,7 +244,37 @@ fn determine_action(
                     }
                 }
                 SyncMode::TwoWay => {
-                    // 2. 3-Way State Comparison (if previously synced state is recorded)
+                    // 2. History Lineage Check:
+                    // If local hash matches an older snapshot in OneDrive history, Remote is the newer successor!
+                    if let Some(lh) = local_hash {
+                        if let Ok(history_versions) = list_versions(remote_dir, file_name) {
+                            if history_versions
+                                .iter()
+                                .any(|v| v.hash.starts_with(&lh[..8.min(lh.len())]))
+                            {
+                                return (
+                                    SyncAction::PullToLocal,
+                                    "Local matches an earlier revision in history; pulling latest OneDrive save".into(),
+                                );
+                            }
+
+                            // If remote hash matches an older snapshot in history and local has newer changes
+                            if let Some(rh) = remote_hash {
+                                if history_versions
+                                    .iter()
+                                    .any(|v| v.hash.starts_with(&rh[..8.min(rh.len())]))
+                                    && l_time > r_time
+                                {
+                                    return (
+                                        SyncAction::PushToRemote,
+                                        "Remote matches an earlier revision in history; pushing newer local save".into(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. 3-Way State Comparison (if previously synced state is recorded)
                     if let (Some(state), Some(lh), Some(rh)) = (file_state, local_hash, remote_hash) {
                         let local_changed = lh != state.synced_hash;
                         let remote_changed = rh != state.synced_hash;
@@ -268,19 +298,6 @@ fn determine_action(
                                     r_time.format("%Y-%m-%d %H:%M:%S")
                                 ),
                             );
-                        }
-                    }
-
-                    // 3. History Check (if state file is missing on this machine, e.g. first run on laptop)
-                    if let Some(lh) = local_hash {
-                        if let Ok(history_versions) = list_versions(remote_dir, file_name) {
-                            // If local hash matches an older snapshot in history, remote is newer
-                            if history_versions.iter().any(|v| v.hash.starts_with(&lh[..8.min(lh.len())])) {
-                                return (
-                                    SyncAction::PullToLocal,
-                                    "Local matches an earlier revision in history; pulling latest OneDrive save".into(),
-                                );
-                            }
                         }
                     }
 

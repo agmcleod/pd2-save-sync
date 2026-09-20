@@ -160,6 +160,66 @@ fn test_conflict_protection_when_destination_is_newer() {
 }
 
 #[test]
+fn test_pull_when_local_matches_onedrive_history_lineage() {
+    let temp = TempDir::new().unwrap();
+    let pc1_local_dir = temp.path().join("PC1_Save");
+    let pc2_local_dir = temp.path().join("PC2_Save");
+    let onedrive_dir = temp.path().join("OneDriveSave");
+
+    fs::create_dir_all(&pc1_local_dir).unwrap();
+    fs::create_dir_all(&pc2_local_dir).unwrap();
+    fs::create_dir_all(&onedrive_dir).unwrap();
+
+    let pc1_config = Config {
+        local_dir: pc1_local_dir.clone(),
+        remote_dir: onedrive_dir.clone(),
+        max_versions: 10,
+        ignored_files: vec![],
+    };
+
+    let pc2_config = Config {
+        local_dir: pc2_local_dir.clone(),
+        remote_dir: onedrive_dir.clone(),
+        max_versions: 10,
+        ignored_files: vec![],
+    };
+
+    // 1. PC 1 starts with Level 1 character and syncs to OneDrive
+    let char_file_pc1 = pc1_local_dir.join("Necromancer.d2s");
+    fs::write(&char_file_pc1, b"necro level 1 base").unwrap();
+    let items = plan_sync(&pc1_config, SyncMode::TwoWay).unwrap();
+    execute_sync(&items, &pc1_config, false).unwrap();
+
+    // 2. PC 2 pulls initial Level 1 character
+    let items = plan_sync(&pc2_config, SyncMode::TwoWay).unwrap();
+    execute_sync(&items, &pc2_config, false).unwrap();
+    assert_eq!(fs::read(pc2_local_dir.join("Necromancer.d2s")).unwrap(), b"necro level 1 base");
+
+    // 3. PC 1 plays to Level 40 and syncs to OneDrive (OneDrive archives Level 1 to .history)
+    fs::write(&char_file_pc1, b"necro level 40 on PC1").unwrap();
+    let items = plan_sync(&pc1_config, SyncMode::TwoWay).unwrap();
+    execute_sync(&items, &pc1_config, false).unwrap();
+
+    // 4. On PC 2, simulate that PC 2 was offline or had state wiped
+    let state_file_pc2 = pc2_local_dir.join(".pd2-sync-state.json");
+    if state_file_pc2.exists() {
+        let _ = fs::remove_file(&state_file_pc2);
+    }
+
+    // 5. PC 2 runs sync. It should detect that its local file (Level 1) is in OneDrive's .history,
+    // and seamlessly Pull Level 40 without any false conflicts!
+    let items = plan_sync(&pc2_config, SyncMode::TwoWay).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].action, SyncAction::PullToLocal);
+    assert!(items[0].reason.contains("Local matches an earlier revision in history"));
+
+    let summary = execute_sync(&items, &pc2_config, false).unwrap();
+    assert_eq!(summary.pulled, 1);
+    assert_eq!(summary.conflicts, 0);
+    assert_eq!(fs::read(pc2_local_dir.join("Necromancer.d2s")).unwrap(), b"necro level 40 on PC1");
+}
+
+#[test]
 fn test_three_way_conflict_detection_when_both_sides_diverged() {
     let temp = TempDir::new().unwrap();
     let local_dir = temp.path().join("LocalSave");
