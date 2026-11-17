@@ -5,11 +5,35 @@ use std::path::{Path, PathBuf};
 const DEFAULT_MAX_VERSIONS: usize = 10;
 pub const CONFIG_FILE_NAME: &str = "pd2-sync.toml";
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PairKind {
+    Save,
+    SimpleCopy,
+}
+
+impl Default for PairKind {
+    fn default() -> Self {
+        Self::Save
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SyncPair {
+    pub name: String,
+    pub local_dir: PathBuf,
+    pub remote_dir: PathBuf,
+    #[serde(default)]
+    pub kind: PairKind,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Local Diablo II / Project Diablo 2 Save directory (e.g., C:\Program Files (x86)\Diablo II\Save)
+    #[serde(default = "detect_default_local_dir")]
     pub local_dir: PathBuf,
     /// OneDrive synchronization folder (e.g., C:\Users\<user>\OneDrive\pd2save)
+    #[serde(default = "detect_default_remote_dir")]
     pub remote_dir: PathBuf,
     /// Number of historic versions to keep in OneDrive (e.g., 7-10)
     #[serde(default = "default_max_versions")]
@@ -17,6 +41,9 @@ pub struct Config {
     /// List of file names or patterns to ignore
     #[serde(default = "default_ignored_files")]
     pub ignored_files: Vec<String>,
+    /// Optional named sync pairs. When empty, the legacy local_dir/remote_dir pair is used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pairs: Vec<SyncPair>,
 }
 
 fn default_max_versions() -> usize {
@@ -38,6 +65,7 @@ impl Default for Config {
             remote_dir: detect_default_remote_dir(),
             max_versions: DEFAULT_MAX_VERSIONS,
             ignored_files: default_ignored_files(),
+            pairs: Vec::new(),
         }
     }
 }
@@ -96,6 +124,19 @@ impl Config {
         std::fs::write(path, serialized)
             .with_context(|| format!("Failed to write config file to {:?}", path))?;
         Ok(())
+    }
+
+    pub fn effective_pairs(&self) -> Vec<SyncPair> {
+        if self.pairs.is_empty() {
+            vec![SyncPair {
+                name: "saves".to_string(),
+                local_dir: self.local_dir.clone(),
+                remote_dir: self.remote_dir.clone(),
+                kind: PairKind::Save,
+            }]
+        } else {
+            self.pairs.clone()
+        }
     }
 }
 

@@ -5,9 +5,9 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::Config;
-use crate::history::{archive_version, compute_file_hash, list_versions, HISTORY_DIR_NAME};
-use crate::state::{FileState, SyncState, STATE_FILE_NAME};
+use crate::config::{Config, PairKind, SyncPair};
+use crate::history::{HISTORY_DIR_NAME, archive_version, compute_file_hash, list_versions};
+use crate::state::{FileState, STATE_FILE_NAME, SyncState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncAction {
@@ -55,7 +55,9 @@ pub fn is_ignored_filename(file_name: &str, user_ignored: &[String]) -> bool {
         || file_name == STATE_FILE_NAME
         || file_name.contains(".conflict")
         || file_name.starts_with('.')
-        || user_ignored.iter().any(|ig| ig.eq_ignore_ascii_case(file_name))
+        || user_ignored
+            .iter()
+            .any(|ig| ig.eq_ignore_ascii_case(file_name))
 }
 
 /// Scans only level-1 files from a directory (subfolders and ignored files are excluded)
@@ -281,7 +283,8 @@ fn determine_action(
                     }
 
                     // 3. 3-Way State Comparison (if previously synced state is recorded)
-                    if let (Some(state), Some(lh), Some(rh)) = (file_state, local_hash, remote_hash) {
+                    if let (Some(state), Some(lh), Some(rh)) = (file_state, local_hash, remote_hash)
+                    {
                         let local_changed = lh != state.synced_hash;
                         let remote_changed = rh != state.synced_hash;
 
@@ -351,6 +354,7 @@ pub fn execute_sync(items: &[SyncItem], config: &Config, dry_run: bool) -> Resul
                 format!("Failed to create local directory {:?}", config.local_dir)
             })?;
         }
+
         if !config.remote_dir.exists() {
             fs::create_dir_all(&config.remote_dir).with_context(|| {
                 format!("Failed to create remote directory {:?}", config.remote_dir)
@@ -570,4 +574,106 @@ pub fn print_status_table(items: &[SyncItem]) {
         );
     }
     println!("{:-<120}\n", "");
+}
+
+pub fn execute_simple_copy(
+    pair: &SyncPair,
+    ignored: &[String],
+    dry_run: bool,
+) -> Result<SyncSummary> {
+    let local_files = scan_level_one_files(&pair.local_dir, ignored)?;
+    let remote_files = scan_level_one_files(&pair.remote_dir, ignored)?;
+    let mut names = BTreeSet::new();
+    for path in local_files.iter().chain(remote_files.iter()) {
+        if let Some(name) = path.file_name() {
+            names.insert(name.to_string_lossy().to_string());
+        }
+    }
+
+    let mut summary = SyncSummary::default();
+    if !dry_run {
+        fs::create_dir_all(&pair.local_dir)
+            .with_context(|| format!("Failed to create local directory {:?}", pair.local_dir))?;
+        fs::create_dir_all(&pair.remote_dir)
+            .with_context(|| format!("Failed to create remote directory {:?}", pair.remote_dir))?;
+    }
+
+    for name in names {
+        let local = pair.local_dir.join(&name);
+        let remote = pair.remote_dir.join(&name);
+        let local_hash = local
+            .is_file()
+            .then(|| compute_file_hash(&local))
+            .transpose()?;
+        let remote_hash = remote
+            .is_file()
+            .then(|| compute_file_hash(&remote))
+            .transpose()?;
+        if local_hash.is_some() && local_hash == remote_hash {
+            summary.skipped += 1;
+            continue;
+        }
+
+        let source = match (local.is_file(), remote.is_file()) {
+            (true, false) => Some((&local, &remote, true)),
+            (false, true) => Some((&remote, &local, false)),
+            (true, true) => {
+                let local_time = fs::metadata(&local)?.modified()?;
+                let remote_time = fs::metadata(&remote)?.modified()?;
+                if local_time >= remote_time {
+                    Some((&local, &remote, true))
+                } else {
+                    Some((&remote, &local, false))
+                }
+            }
+            (false, false) => None,
+        };
+
+        if let Some((source, destination, pushed)) = source {
+            if dry_run {
+                println!(
+                    "[DRY-RUN] Copy {} -> {}",
+                    source.display(),
+                    destination.display()
+                );
+            } else {
+                fs::copy(source, destination)
+                    .with_context(|| format!("Failed to copy {:?} to {:?}", source, destination))?;
+            }
+            if pushed {
+                summary.pushed += 1;
+            } else {
+                summary.pulled += 1;
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
+pub fn execute_configured_pairs(config: &Config, dry_run: bool) -> Result<SyncSummary> {
+    let mut total = SyncSummary::default();
+    for pair in config.effective_pairs() {
+        println!("Syncing pair '{}'", pair.name);
+        let summary = match pair.kind {
+            PairKind::Save => {
+                let pair_config = Config {
+                    local_dir: pair.local_dir,
+                    remote_dir: pair.remote_dir,
+                    max_versions: config.max_versions,
+                    ignored_files: config.ignored_files.clone(),
+                    pairs: Vec::new(),
+                };
+                let items = plan_sync(&pair_config, SyncMode::TwoWay)?;
+                execute_sync(&items, &pair_config, dry_run)?
+            }
+            PairKind::SimpleCopy => execute_simple_copy(&pair, &config.ignored_files, dry_run)?,
+        };
+        total.pushed += summary.pushed;
+        total.pulled += summary.pulled;
+        total.skipped += summary.skipped;
+        total.conflicts += summary.conflicts;
+        total.errors += summary.errors;
+    }
+    Ok(total)
 }

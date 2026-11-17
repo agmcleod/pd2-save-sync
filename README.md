@@ -12,6 +12,7 @@ A lightweight, conflict-safe save synchronization and version backup tool for **
 - **Rollback / Restore**: Inspect past save backups and restore any previous version with a single command.
 - **Live Watcher**: Background file watcher with debounce that automatically syncs whenever Diablo II saves or exits.
 - **Dry-Run Mode**: Preview what files will be copied before touching anything.
+- **Named Sync Pairs**: Sync saves and other level-one file directories with one configuration.
 
 ---
 
@@ -106,6 +107,46 @@ max_versions = 10
 ignored_files = ["desktop.ini", "thumbs.db", ".DS_Store"]
 ```
 
+For multiple directories, add named pairs. Save pairs retain conflict detection and history;
+`simple-copy` pairs (useful for lootfilters) copy the newest version by modification time and
+do not create backups:
+
+```toml
+[[pairs]]
+name = "saves"
+kind = "save"
+local_dir = "/home/deck/.local/share/ProjectD2/Save"
+remote_dir = "/home/deck/OneDrive/pd2save"
+
+[[pairs]]
+name = "lootfilters"
+kind = "simple-copy"
+local_dir = "/home/deck/.local/share/ProjectD2/filters/local"
+remote_dir = "/home/deck/OneDrive/pd2filters"
+```
+
+Run all configured pairs with:
+
+```bash
+pd2-save-sync --config ~/.config/pd2-save-sync/pd2-sync.toml sync-all
+```
+
+When `[[pairs]]` is present, the regular `sync` command and a command with no subcommand
+also process all configured pairs. Legacy configs without pairs keep their original behavior.
+
+### Steam Deck launcher
+
+The repository includes `scripts/pd2-steamdeck-launcher.sh`, which runs OneDrive, waits for it
+to finish, runs `sync-all`, starts the game, and repeats both syncs after the game exits. Copy
+`scripts/steamdeck-launcher.conf.example` to
+`~/.config/pd2-save-sync/steamdeck-launcher.conf`, then edit the binary, config, OneDrive
+options, and `GAME_COMMAND` once. The launcher defaults to `~/.local/bin/onedrive` and blocks
+game startup if either pre-game synchronization fails.
+
+The Windows filter path
+`C:\Program Files (x86)\Diablo II\ProjectD2\filters\local` is not a valid Steam Deck path;
+set the Proton/Linux equivalent in the `lootfilters` pair's `local_dir`.
+
 ---
 
 ## CLI Command Reference
@@ -114,6 +155,7 @@ ignored_files = ["desktop.ini", "thumbs.db", ".DS_Store"]
 | :------------------------------------- | :--------------------------------------------------------------------------------- |
 | `pd2-save-sync` / `pd2-save-sync sync` | Two-way sync with 3-way conflict checks & version history                          |
 | `pd2-save-sync sync --dry-run`         | Preview sync actions without writing to disk                                       |
+| `pd2-save-sync sync-all`               | Synchronize all configured save and simple-copy pairs                              |
 | `pd2-save-sync status`                 | Display comparison table between local and OneDrive                                |
 | `pd2-save-sync push`                   | Force upload local save files to OneDrive                                          |
 | `pd2-save-sync pull`                   | Download OneDrive saves to local (protected against overwriting newer local saves) |

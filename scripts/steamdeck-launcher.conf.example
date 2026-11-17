@@ -1,0 +1,14 @@
+# Copy this file to ~/.config/pd2-save-sync/steamdeck-launcher.conf and edit it.
+
+# The default is ~/.local/bin/onedrive.
+ONEDRIVE_BIN="$HOME/.local/bin/onedrive"
+# Add any options needed by your OneDrive setup.
+ONEDRIVE_ARGS=(--synchronize)
+
+# Use the release binary, or an absolute path to a locally installed binary.
+SYNC_BIN="$HOME/.local/bin/pd2-save-sync"
+SYNC_CONFIG="$HOME/.config/pd2-save-sync/pd2-sync.toml"
+
+# Bash array so paths and Proton arguments containing spaces remain safe.
+# Replace this with the Steam/Proton launch command for Project Diablo 2.
+GAME_COMMAND=(steam steam://rungameid/YOUR_GAME_ID)

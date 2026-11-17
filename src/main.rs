@@ -3,14 +3,20 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::{Path, PathBuf};
 
-use pd2_save_sync::config::{Config, CONFIG_FILE_NAME};
+use pd2_save_sync::config::{CONFIG_FILE_NAME, Config};
 use pd2_save_sync::history::{get_history_dir, list_versions, restore_version};
-use pd2_save_sync::sync::{execute_sync, plan_sync, print_status_table, scan_level_one_files, SyncMode};
+use pd2_save_sync::sync::{
+    SyncMode, execute_configured_pairs, execute_sync, plan_sync, print_status_table,
+    scan_level_one_files,
+};
 use pd2_save_sync::watcher::watch_and_sync;
 
 #[derive(Parser, Debug)]
 #[command(name = "pd2-save-sync")]
-#[command(about = "Synchronize Diablo II / Project Diablo 2 saves with OneDrive and manage version backups", version)]
+#[command(
+    about = "Synchronize Diablo II / Project Diablo 2 saves with OneDrive and manage version backups",
+    version
+)]
 struct Cli {
     /// Path to a custom config TOML file
     #[arg(short, long, global = true)]
@@ -36,6 +42,12 @@ struct Cli {
 enum Commands {
     /// Perform two-way sync between local Save and OneDrive (Default)
     Sync {
+        /// Preview changes without modifying files on disk
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Synchronize all configured save and lootfilter pairs
+    SyncAll {
         /// Preview changes without modifying files on disk
         #[arg(long)]
         dry_run: bool,
@@ -98,10 +110,21 @@ fn main() -> Result<()> {
 
     match cli.command {
         None => {
-            run_sync(&config, SyncMode::TwoWay, false, loaded_path.as_deref())?;
+            if config.pairs.is_empty() {
+                run_sync(&config, SyncMode::TwoWay, false, loaded_path.as_deref())?;
+            } else {
+                run_configured_pairs(&config, false)?;
+            }
         }
         Some(Commands::Sync { dry_run }) => {
-            run_sync(&config, SyncMode::TwoWay, dry_run, loaded_path.as_deref())?;
+            if config.pairs.is_empty() {
+                run_sync(&config, SyncMode::TwoWay, dry_run, loaded_path.as_deref())?;
+            } else {
+                run_configured_pairs(&config, dry_run)?;
+            }
+        }
+        Some(Commands::SyncAll { dry_run }) => {
+            run_configured_pairs(&config, dry_run)?;
         }
         Some(Commands::Push { dry_run }) => {
             run_sync(&config, SyncMode::PushOnly, dry_run, loaded_path.as_deref())?;
@@ -136,6 +159,18 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn run_configured_pairs(config: &Config, dry_run: bool) -> Result<()> {
+    let summary = execute_configured_pairs(config, dry_run)?;
+    println!(
+        "Configured pairs complete: {} pushed, {} pulled, {} skipped, {} conflicts, {} errors",
+        summary.pushed, summary.pulled, summary.skipped, summary.conflicts, summary.errors
+    );
+    if summary.errors > 0 || summary.conflicts > 0 {
+        anyhow::bail!("Configured pair sync completed with errors or conflicts");
+    }
+    Ok(())
+}
+
 fn run_sync(
     config: &Config,
     mode: SyncMode,
@@ -151,7 +186,10 @@ fn run_sync(
     println!("Max Versions: {}", config.max_versions);
     println!("Mode:         {:?}", mode);
     if dry_run {
-        println!("{}", "[DRY RUN MODE - No files will be modified]".yellow().bold());
+        println!(
+            "{}",
+            "[DRY RUN MODE - No files will be modified]".yellow().bold()
+        );
     }
     println!();
 
@@ -168,10 +206,16 @@ fn run_sync(
     println!("Pulled to Local:    {}", summary.pulled.to_string().blue());
     println!("Skipped (Up-to-date): {}", summary.skipped);
     if summary.conflicts > 0 {
-        println!("Conflicts detected:  {}", summary.conflicts.to_string().yellow().bold());
+        println!(
+            "Conflicts detected:  {}",
+            summary.conflicts.to_string().yellow().bold()
+        );
     }
     if summary.errors > 0 {
-        println!("Errors encountered:  {}", summary.errors.to_string().red().bold());
+        println!(
+            "Errors encountered:  {}",
+            summary.errors.to_string().red().bold()
+        );
     }
 
     Ok(())
@@ -197,7 +241,10 @@ fn run_status(config: &Config, config_path: Option<&Path>) -> Result<()> {
 
 fn run_history(config: &Config, target_file: Option<&str>) -> Result<()> {
     println!("{}", "=== Save Version History ===".bold().cyan());
-    println!("History Location: {}\n", get_history_dir(&config.remote_dir).display());
+    println!(
+        "History Location: {}\n",
+        get_history_dir(&config.remote_dir).display()
+    );
 
     if let Some(file_name) = target_file {
         let versions = list_versions(&config.remote_dir, file_name)?;
@@ -206,7 +253,11 @@ fn run_history(config: &Config, target_file: Option<&str>) -> Result<()> {
             return Ok(());
         }
 
-        println!("Found {} version(s) for '{}':", versions.len(), file_name.bold());
+        println!(
+            "Found {} version(s) for '{}':",
+            versions.len(),
+            file_name.bold()
+        );
         for (i, v) in versions.iter().enumerate() {
             println!(
                 "  [{:>2}] {} | Size: {:>8} bytes | Hash: {}",
@@ -243,7 +294,11 @@ fn run_history(config: &Config, target_file: Option<&str>) -> Result<()> {
 
         for file_name in all_files {
             let versions = list_versions(&config.remote_dir, &file_name)?;
-            println!("* {} ({} versions recorded)", file_name.bold(), versions.len());
+            println!(
+                "* {} ({} versions recorded)",
+                file_name.bold(),
+                versions.len()
+            );
             for (i, v) in versions.iter().enumerate() {
                 println!(
                     "    [{:>2}] {} ({} bytes, hash: {})",

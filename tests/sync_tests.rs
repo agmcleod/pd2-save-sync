@@ -1,7 +1,10 @@
-use pd2_save_sync::config::Config;
+use pd2_save_sync::config::{Config, PairKind, SyncPair};
 use pd2_save_sync::history::{archive_version, list_versions, restore_version};
 use pd2_save_sync::state::SyncState;
-use pd2_save_sync::sync::{execute_sync, plan_sync, scan_level_one_files, SyncAction, SyncMode};
+use pd2_save_sync::sync::{
+    SyncAction, SyncMode, execute_configured_pairs, execute_simple_copy, execute_sync, plan_sync,
+    scan_level_one_files,
+};
 use std::fs;
 use std::thread::sleep;
 use std::time::Duration;
@@ -31,8 +34,16 @@ fn test_level_one_only_and_ignore_subfolders() {
     fs::write(save_dir.join("desktop.ini"), b"ignore me").unwrap();
 
     // Conflict backup files (should be ignored and kept strictly locally)
-    fs::write(save_dir.join("Paladin.conflict_20260920_120000.d2s"), b"conflict copy").unwrap();
-    fs::write(save_dir.join("SharedStash.stash.conflict_20260920_120000"), b"conflict copy").unwrap();
+    fs::write(
+        save_dir.join("Paladin.conflict_20260920_120000.d2s"),
+        b"conflict copy",
+    )
+    .unwrap();
+    fs::write(
+        save_dir.join("SharedStash.stash.conflict_20260920_120000"),
+        b"conflict copy",
+    )
+    .unwrap();
 
     let ignored = vec!["desktop.ini".to_string()];
     let scanned = scan_level_one_files(&save_dir, &ignored).unwrap();
@@ -52,6 +63,76 @@ fn test_level_one_only_and_ignore_subfolders() {
 }
 
 #[test]
+fn test_simple_copy_uses_newer_filter_file_without_history() {
+    let temp = TempDir::new().unwrap();
+    let local_dir = temp.path().join("filters");
+    let remote_dir = temp.path().join("remote-filters");
+    fs::create_dir_all(&local_dir).unwrap();
+    fs::create_dir_all(&remote_dir).unwrap();
+
+    fs::write(remote_dir.join("default.filter"), b"old filter").unwrap();
+    sleep(Duration::from_millis(50));
+    fs::write(local_dir.join("default.filter"), b"new filter").unwrap();
+
+    let pair = SyncPair {
+        name: "filters".to_string(),
+        local_dir: local_dir.clone(),
+        remote_dir: remote_dir.clone(),
+        kind: PairKind::SimpleCopy,
+    };
+    let summary = execute_simple_copy(&pair, &[], false).unwrap();
+
+    assert_eq!(summary.pushed, 1);
+    assert_eq!(
+        fs::read(remote_dir.join("default.filter")).unwrap(),
+        b"new filter"
+    );
+    assert!(!remote_dir.join(".history").exists());
+}
+
+#[test]
+fn test_configured_pairs_sync_save_and_filter_directories() {
+    let temp = TempDir::new().unwrap();
+    let save_local = temp.path().join("save");
+    let save_remote = temp.path().join("save-remote");
+    let filter_local = temp.path().join("filters");
+    let filter_remote = temp.path().join("filters-remote");
+    fs::create_dir_all(&save_local).unwrap();
+    fs::create_dir_all(&filter_local).unwrap();
+    fs::write(save_local.join("Hero.d2s"), b"hero").unwrap();
+    fs::write(filter_local.join("loot.filter"), b"loot").unwrap();
+
+    let config = Config {
+        local_dir: save_local.clone(),
+        remote_dir: save_remote.clone(),
+        max_versions: 10,
+        ignored_files: vec![],
+        pairs: vec![
+            SyncPair {
+                name: "saves".to_string(),
+                local_dir: save_local.clone(),
+                remote_dir: save_remote.clone(),
+                kind: PairKind::Save,
+            },
+            SyncPair {
+                name: "filters".to_string(),
+                local_dir: filter_local.clone(),
+                remote_dir: filter_remote.clone(),
+                kind: PairKind::SimpleCopy,
+            },
+        ],
+    };
+
+    let summary = execute_configured_pairs(&config, false).unwrap();
+    assert_eq!(summary.pushed, 2);
+    assert_eq!(fs::read(save_remote.join("Hero.d2s")).unwrap(), b"hero");
+    assert_eq!(
+        fs::read(filter_remote.join("loot.filter")).unwrap(),
+        b"loot"
+    );
+}
+
+#[test]
 fn test_sync_push_local_to_onedrive_and_history() {
     let temp = TempDir::new().unwrap();
     let local_dir = temp.path().join("LocalSave");
@@ -68,6 +149,7 @@ fn test_sync_push_local_to_onedrive_and_history() {
         remote_dir: remote_dir.clone(),
         max_versions: 10,
         ignored_files: vec![],
+        pairs: vec![],
     };
 
     let items = plan_sync(&config, SyncMode::TwoWay).unwrap();
@@ -116,6 +198,7 @@ fn test_sync_pull_when_onedrive_newer() {
         remote_dir: remote_dir.clone(),
         max_versions: 10,
         ignored_files: vec![],
+        pairs: vec![],
     };
 
     let items = plan_sync(&config, SyncMode::TwoWay).unwrap();
@@ -124,7 +207,10 @@ fn test_sync_pull_when_onedrive_newer() {
 
     let summary = execute_sync(&items, &config, false).unwrap();
     assert_eq!(summary.pulled, 1);
-    assert_eq!(fs::read(&local_file).unwrap(), b"barbarian level 50 (from PC 2)");
+    assert_eq!(
+        fs::read(&local_file).unwrap(),
+        b"barbarian level 50 (from PC 2)"
+    );
 }
 
 #[test]
@@ -151,6 +237,7 @@ fn test_conflict_protection_when_destination_is_newer() {
         remote_dir: remote_dir.clone(),
         max_versions: 10,
         ignored_files: vec![],
+        pairs: vec![],
     };
 
     // If pulling, local file MUST NOT be overwritten because local timestamp is newer
@@ -181,6 +268,7 @@ fn test_pull_when_local_matches_onedrive_history_lineage() {
         remote_dir: onedrive_dir.clone(),
         max_versions: 10,
         ignored_files: vec![],
+        pairs: vec![],
     };
 
     let pc2_config = Config {
@@ -188,6 +276,7 @@ fn test_pull_when_local_matches_onedrive_history_lineage() {
         remote_dir: onedrive_dir.clone(),
         max_versions: 10,
         ignored_files: vec![],
+        pairs: vec![],
     };
 
     // 1. PC 1 starts with Level 1 character and syncs to OneDrive
@@ -199,7 +288,10 @@ fn test_pull_when_local_matches_onedrive_history_lineage() {
     // 2. PC 2 pulls initial Level 1 character
     let items = plan_sync(&pc2_config, SyncMode::TwoWay).unwrap();
     execute_sync(&items, &pc2_config, false).unwrap();
-    assert_eq!(fs::read(pc2_local_dir.join("Necromancer.d2s")).unwrap(), b"necro level 1 base");
+    assert_eq!(
+        fs::read(pc2_local_dir.join("Necromancer.d2s")).unwrap(),
+        b"necro level 1 base"
+    );
 
     // 3. PC 1 plays to Level 40 and syncs to OneDrive (OneDrive archives Level 1 to .history)
     fs::write(&char_file_pc1, b"necro level 40 on PC1").unwrap();
@@ -217,12 +309,19 @@ fn test_pull_when_local_matches_onedrive_history_lineage() {
     let items = plan_sync(&pc2_config, SyncMode::TwoWay).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].action, SyncAction::PullToLocal);
-    assert!(items[0].reason.contains("Local matches an earlier revision in history"));
+    assert!(
+        items[0]
+            .reason
+            .contains("Local matches an earlier revision in history")
+    );
 
     let summary = execute_sync(&items, &pc2_config, false).unwrap();
     assert_eq!(summary.pulled, 1);
     assert_eq!(summary.conflicts, 0);
-    assert_eq!(fs::read(pc2_local_dir.join("Necromancer.d2s")).unwrap(), b"necro level 40 on PC1");
+    assert_eq!(
+        fs::read(pc2_local_dir.join("Necromancer.d2s")).unwrap(),
+        b"necro level 40 on PC1"
+    );
 }
 
 #[test]
@@ -239,6 +338,7 @@ fn test_three_way_conflict_detection_when_both_sides_diverged() {
         remote_dir: remote_dir.clone(),
         max_versions: 10,
         ignored_files: vec![],
+        pairs: vec![],
     };
 
     // Step 1: Initial synchronized state (e.g. baseline save)
@@ -262,7 +362,10 @@ fn test_three_way_conflict_detection_when_both_sides_diverged() {
     // Step 4: Execute sync - protects local file and creates conflict copy
     let summary = execute_sync(&items, &config, false).unwrap();
     assert_eq!(summary.conflicts, 1);
-    assert_eq!(fs::read(local_dir.join("Druid.d2s")).unwrap(), b"druid local level 20");
+    assert_eq!(
+        fs::read(local_dir.join("Druid.d2s")).unwrap(),
+        b"druid local level 20"
+    );
 
     // Verify a .conflict copy was preserved in local directory
     let files = fs::read_dir(&local_dir).unwrap();
@@ -270,7 +373,10 @@ fn test_three_way_conflict_detection_when_both_sides_diverged() {
         let name = e.file_name().to_string_lossy().to_string();
         name.starts_with("Druid.conflict_")
     });
-    assert!(conflict_file_exists, "A .conflict backup copy must be preserved");
+    assert!(
+        conflict_file_exists,
+        "A .conflict backup copy must be preserved"
+    );
 }
 
 #[test]
@@ -291,6 +397,7 @@ fn test_identical_hashes_skipped() {
         remote_dir,
         max_versions: 10,
         ignored_files: vec![],
+        pairs: vec![],
     };
 
     let items = plan_sync(&config, SyncMode::TwoWay).unwrap();
@@ -352,6 +459,7 @@ fn test_dry_run_mode_does_not_modify_files() {
         remote_dir: remote_dir.clone(),
         max_versions: 10,
         ignored_files: vec![],
+        pairs: vec![],
     };
 
     let items = plan_sync(&config, SyncMode::TwoWay).unwrap();
@@ -372,6 +480,7 @@ fn test_config_save_and_load() {
         remote_dir: temp.path().join("CloudSave"),
         max_versions: 8,
         ignored_files: vec!["custom.tmp".to_string()],
+        pairs: vec![],
     };
 
     original.save_to_file(&config_path).unwrap();
@@ -383,4 +492,53 @@ fn test_config_save_and_load() {
     assert_eq!(loaded.ignored_files, vec!["custom.tmp".to_string()]);
     assert_eq!(loaded.local_dir, original.local_dir);
     assert_eq!(loaded.remote_dir, original.remote_dir);
+}
+
+#[test]
+fn test_named_pairs_round_trip() {
+    let temp = TempDir::new().unwrap();
+    let config_path = temp.path().join("pairs.toml");
+    let original = Config {
+        local_dir: temp.path().join("legacy-local"),
+        remote_dir: temp.path().join("legacy-remote"),
+        max_versions: 10,
+        ignored_files: vec![],
+        pairs: vec![SyncPair {
+            name: "lootfilters".to_string(),
+            local_dir: temp.path().join("filters"),
+            remote_dir: temp.path().join("remote-filters"),
+            kind: PairKind::SimpleCopy,
+        }],
+    };
+
+    original.save_to_file(&config_path).unwrap();
+    let (loaded, _) = Config::load_or_default(Some(&config_path)).unwrap();
+    assert_eq!(loaded.pairs, original.pairs);
+}
+
+#[test]
+fn test_pairs_only_config_loads_without_legacy_directories() {
+    let temp = TempDir::new().unwrap();
+    let config_path = temp.path().join("pairs-only.toml");
+    fs::write(
+        &config_path,
+        format!(
+            r#"max_versions = 10
+ignored_files = ["desktop.ini"]
+
+[[pairs]]
+name = "saves"
+kind = "save"
+local_dir = '{}'
+remote_dir = '{}'
+"#,
+            temp.path().join("save").display(),
+            temp.path().join("remote").display()
+        ),
+    )
+    .unwrap();
+
+    let (loaded, _) = Config::load_or_default(Some(&config_path)).unwrap();
+    assert_eq!(loaded.pairs.len(), 1);
+    assert_eq!(loaded.pairs[0].name, "saves");
 }
