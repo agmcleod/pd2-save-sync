@@ -15,8 +15,18 @@ source "$CONFIG_FILE"
 : "${ONEDRIVE_BIN:=$HOME/.local/bin/onedrive}"
 : "${SYNC_BIN:?SYNC_BIN must be set in the launcher configuration}"
 : "${SYNC_CONFIG:?SYNC_CONFIG must be set in the launcher configuration}"
-: "${GAME_COMMAND:?GAME_COMMAND must be set in the launcher configuration}"
 ONEDRIVE_ARGS=("${ONEDRIVE_ARGS[@]:---synchronize}")
+
+if [[ "${1:-}" == "--steam-wrapper" ]]; then
+    shift
+    if (( $# == 0 )); then
+        printf 'Steam wrapper mode requires a game command.\n' >&2
+        exit 2
+    fi
+    GAME_COMMAND=("$@")
+else
+    : "${GAME_COMMAND:?GAME_COMMAND must be set in the launcher configuration}"
+fi
 
 run_onedrive() {
     printf '[launcher] Synchronizing OneDrive...\n'

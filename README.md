@@ -143,6 +143,16 @@ to finish, runs `sync-all`, starts the game, and repeats both syncs after the ga
 options, and `GAME_COMMAND` once. The launcher defaults to `~/.local/bin/onedrive` and blocks
 game startup if either pre-game synchronization fails.
 
+To keep an existing Steam game entry and its Proton configuration, add this to that game's
+Steam **Launch Options** instead:
+
+```text
+/home/deck/.local/bin/pd2-steamdeck-launcher --steam-wrapper %command%
+```
+
+Steam replaces `%command%` with the existing Proton/game command. The wrapper runs the
+pre-game sync, executes that command, waits for it to exit, and then runs the post-game sync.
+
 The Windows filter path
 `C:\Program Files (x86)\Diablo II\ProjectD2\filters\local` is not a valid Steam Deck path;
 set the Proton/Linux equivalent in the `lootfilters` pair's `local_dir`.
