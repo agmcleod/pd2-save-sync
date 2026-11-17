@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-CONFIG_FILE="${1:-${XDG_CONFIG_HOME:-$HOME/.config}/pd2-save-sync/steamdeck-launcher.conf}"
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/pd2-save-sync/steamdeck-launcher.conf"
+STEAM_WRAPPER=false
+
+if [[ "${1:-}" == "--steam-wrapper" ]]; then
+    STEAM_WRAPPER=true
+    shift
+elif [[ $# -gt 0 && "${1:0:1}" != "-" ]]; then
+    CONFIG_FILE="$1"
+    shift
+fi
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
     printf 'Launcher configuration not found: %s\n' "$CONFIG_FILE" >&2
@@ -17,8 +26,7 @@ source "$CONFIG_FILE"
 : "${SYNC_CONFIG:?SYNC_CONFIG must be set in the launcher configuration}"
 ONEDRIVE_ARGS=("${ONEDRIVE_ARGS[@]:---synchronize}")
 
-if [[ "${1:-}" == "--steam-wrapper" ]]; then
-    shift
+if [[ "$STEAM_WRAPPER" == true ]]; then
     if (( $# == 0 )); then
         printf 'Steam wrapper mode requires a game command.\n' >&2
         exit 2
