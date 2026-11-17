@@ -59,8 +59,12 @@ fi
 
 printf '[launcher] Game exited with status %d; running post-game synchronization.\n' "$game_status"
 post_status=0
-run_onedrive || post_status=$?
 run_pd2_sync || post_status=$?
+onedrive_status=0
+run_onedrive || onedrive_status=$?
+if (( post_status == 0 )); then
+    post_status=$onedrive_status
+fi
 
 if (( post_status != 0 )); then
     printf '[launcher] Post-game synchronization failed with status %d.\n' "$post_status" >&2

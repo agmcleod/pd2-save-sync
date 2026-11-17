@@ -150,8 +150,9 @@ Steam **Launch Options** instead:
 /home/deck/.local/bin/pd2-steamdeck-launcher --steam-wrapper %command%
 ```
 
-Steam replaces `%command%` with the existing Proton/game command. The wrapper runs the
-pre-game sync, executes that command, waits for it to exit, and then runs the post-game sync.
+Steam replaces `%command%` with the existing Proton/game command. The wrapper runs OneDrive
+then `pd2-save-sync` before the game, executes that command, waits for it to exit, then runs
+`pd2-save-sync` followed by OneDrive after the game so local changes are uploaded.
 
 The Windows filter path
 `C:\Program Files (x86)\Diablo II\ProjectD2\filters\local` is not a valid Steam Deck path;
