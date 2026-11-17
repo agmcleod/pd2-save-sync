@@ -3,7 +3,7 @@
 # The default is ~/.local/bin/onedrive.
 ONEDRIVE_BIN="$HOME/.local/bin/onedrive"
 # Add any options needed by your OneDrive setup.
-ONEDRIVE_ARGS=(--synchronize)
+ONEDRIVE_ARGS=(--sync)
 
 # Use the release binary, or an absolute path to a locally installed binary.
 SYNC_BIN="$HOME/.local/bin/pd2-save-sync"
