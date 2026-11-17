@@ -143,6 +143,10 @@ to finish, runs `sync-all`, starts the game, and repeats both syncs after the ga
 options, and `GAME_COMMAND` once. The launcher defaults to `~/.local/bin/onedrive` and blocks
 game startup if either pre-game synchronization fails.
 
+I've build this to expect usage of https://github.com/abraunegg/onedrive, which for steam deck
+you'll want to install the arch linux build. Can use a distrobox to install via pacman, and
+copy the files into your home directory
+
 To keep an existing Steam game entry and its Proton configuration, add this to that game's
 Steam **Launch Options** instead:
 
